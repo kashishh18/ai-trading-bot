@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+backend/trading_bot_env/
+
+# Database files
+*.db
+*.sqlite
+
+# Environment files
+.env
+
+# System files
+.DS_Store
+
+# Build files
+build/
+dist/
+
+# Logs
+*.log
+
+# Package lock files (optional)
+package-lock.json
