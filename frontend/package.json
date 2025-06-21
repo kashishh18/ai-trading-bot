@@ -1,1 +1,182 @@
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import Dashboard from './components/Dashboard';
+import TradingPanel from './components/TradingPanel';
+import Portfolio from './components/Portfolio';
+import Predictions from './components/Predictions';
+import Settings from './components/Settings';
+import { 
+  TrendingUp, 
+  Bot, 
+  Briefcase, 
+  Crystal, 
+  Settings as SettingsIcon,
+  Activity,
+  DollarSign,
+  AlertCircle
+} from 'lucide-react';
+import './App.css';
 
+// Types for our data
+interface EngineStatus {
+  is_running: boolean;
+  auto_trade: boolean;
+  market_open: boolean;
+  portfolio_summary: {
+    total_value: number;
+    total_return_percent: number;
+    number_of_positions: number;
+  };
+  trading_stats: {
+    total_signals: number;
+    success_rate: number;
+  };
+}
+
+interface Alert {
+  id: number;
+  type: string;
+  message: string;
+  symbol?: string;
+  timestamp: string;
+}
+
+function App() {
+  // State management
+  const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [currentPage, setCurrentPage] = useState('dashboard');
+
+  // Check backend connection
+  useEffect(() => {
+    const checkConnection = async () => {
+      try {
+        const response = await fetch('/health');
+        if (response.ok) {
+          setIsConnected(true);
+          fetchEngineStatus();
+        }
+      } catch (error) {
+        console.error('Backend connection failed:', error);
+        setIsConnected(false);
+      }
+    };
+
+    checkConnection();
+    
+    // Check every 30 seconds
+    const interval = setInterval(checkConnection, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Fetch engine status
+  const fetchEngineStatus = async () => {
+    try {
+      const response = await fetch('/api/engine/status');
+      if (response.ok) {
+        const data = await response.json();
+        setEngineStatus(data);
+        
+        // Get recent alerts
+        if (data.recent_alerts) {
+          setAlerts(data.recent_alerts);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch engine status:', error);
+    }
+  };
+
+  // Refresh data every 10 seconds
+  useEffect(() => {
+    if (isConnected) {
+      const interval = setInterval(fetchEngineStatus, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [isConnected]);
+
+  // Toggle auto-trading
+  const toggleAutoTrading = async () => {
+    try {
+      const newState = !engineStatus?.auto_trade;
+      const response = await fetch('/api/engine/toggle-auto-trade', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ auto_trade: newState }),
+      });
+
+      if (response.ok) {
+        await fetchEngineStatus();
+      }
+    } catch (error) {
+      console.error('Failed to toggle auto-trading:', error);
+    }
+  };
+
+  // Start/Stop engine
+  const toggleEngine = async () => {
+    try {
+      const endpoint = engineStatus?.is_running ? '/api/engine/stop' : '/api/engine/start';
+      const response = await fetch(endpoint, { method: 'POST' });
+
+      if (response.ok) {
+        await fetchEngineStatus();
+      }
+    } catch (error) {
+      console.error('Failed to toggle engine:', error);
+    }
+  };
+
+  return (
+    <div className=\"min-h-screen bg-gray-900 text-white\">
+      {/* Header */}
+      <header className=\"bg-gray-800 border-b border-gray-700 px-6 py-4\">
+        <div className=\"flex items-center justify-between\">
+          {/* Logo and Title */}
+          <div className=\"flex items-center space-x-3\">
+            <div className=\"bg-blue-600 p-2 rounded-lg\">
+              <Bot className=\"w-8 h-8\" />
+            </div>
+            <div>
+              <h1 className=\"text-xl font-bold\">AI Trading Bot</h1>
+              <p className=\"text-gray-400 text-sm\">Your Smart Money Manager 🤖💰</p>
+            </div>
+          </div>
+
+          {/* Status Indicators */}
+          <div className=\"flex items-center space-x-4\">
+            {/* Connection Status */}
+            <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm ${\n              isConnected ? 'bg-green-600' : 'bg-red-600'\n            }`}>
+              <div className={`w-2 h-2 rounded-full ${\n                isConnected ? 'bg-green-300' : 'bg-red-300'\n              }`} />
+              <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
+            </div>
+
+            {/* Market Status */}
+            {engineStatus && (
+              <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm ${\n                engineStatus.market_open ? 'bg-green-600' : 'bg-yellow-600'\n              }`}>
+                <Activity className=\"w-4 h-4\" />
+                <span>{engineStatus.market_open ? 'Market Open' : 'Market Closed'}</span>
+              </div>
+            )}
+
+            {/* Portfolio Value */}
+            {engineStatus?.portfolio_summary && (
+              <div className=\"flex items-center space-x-2 text-lg font-bold\">
+                <DollarSign className=\"w-5 h-5 text-green-400\" />
+                <span className=\"text-green-400\">
+                  ${engineStatus.portfolio_summary.total_value.toLocaleString()}
+                </span>
+                <span className={`text-sm ${\n                  engineStatus.portfolio_summary.total_return_percent >= 0 \n                    ? 'text-green-400' : 'text-red-400'\n                }`}>
+                  ({engineStatus.portfolio_summary.total_return_percent >= 0 ? '+' : ''}\n                  {engineStatus.portfolio_summary.total_return_percent.toFixed(2)}%)
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Navigation */}
+        <nav className=\"mt-4 flex space-x-6\">
+          <button\n            onClick={() => setCurrentPage('dashboard')}\n 
