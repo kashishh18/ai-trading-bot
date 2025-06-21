@@ -17,11 +17,16 @@ from models.risk_manager import RiskManager
 from services.market_data import MarketDataService
 from database.db_manager import DatabaseManager
 
+# ADD THIS: Discord integration import
+from integrations.discord_bot import discord_notifier, notify_trade, notify_opportunity, notify_position_closed, notify_error
+
 class TradingEngine:
     """
     This is the MASTER BRAIN! 🧠⚡
     It combines AI predictions, risk management, and market data
     to make smart trading decisions automatically!
+    
+    NOW WITH DISCORD NOTIFICATIONS! 💬🚀
     """
     
     def __init__(self, initial_balance: float = 100000, auto_trade: bool = False):
@@ -64,6 +69,7 @@ class TradingEngine:
         print(f"💰 Starting balance: ${initial_balance:,.2f}")
         print(f"🤖 Auto-trading: {'ON' if auto_trade else 'OFF'}")
         print(f"👀 Watching {len(self.watchlist)} stocks")
+        print(f"💬 Discord notifications: {'ON' if discord_notifier.enabled else 'OFF'}")
     
     def add_alert(self, alert_type: str, message: str, symbol: str = None):
         """Add an alert/notification"""
@@ -82,6 +88,10 @@ class TradingEngine:
             self.alerts = self.alerts[-self.max_alerts:]
         
         print(f"🔔 {alert_type}: {message}")
+        
+        # ADD THIS: Send Discord notification for errors
+        if alert_type == 'ERROR':
+            notify_error(message, "Trading Engine Error")
     
     def is_market_open(self) -> bool:
         """Check if the market is open (simple version)"""
@@ -160,7 +170,9 @@ class TradingEngine:
                         )
                 
             except Exception as e:
-                print(f"❌ Error scanning {symbol}: {e}")
+                error_msg = f"Error scanning {symbol}: {e}"
+                print(f"❌ {error_msg}")
+                self.add_alert('ERROR', error_msg, symbol)
                 continue
         
         # Sort opportunities by confidence and expected return
@@ -171,6 +183,13 @@ class TradingEngine:
         
         self.trading_stats['last_scan'] = datetime.now()
         print(f"✅ Found {len(opportunities)} trading opportunities")
+        
+        # ADD THIS: Send Discord notification about opportunities
+        if opportunities:
+            try:
+                notify_opportunity(opportunities[:5])  # Send top 5 opportunities
+            except Exception as e:
+                print(f"⚠️ Failed to send Discord opportunity notification: {e}")
         
         return opportunities
     
@@ -222,6 +241,20 @@ class TradingEngine:
                     f"({trade_result['position']['shares']} shares)",
                     symbol
                 )
+                
+                # ADD THIS: Send Discord notification about successful trade
+                try:
+                    discord_trade_data = {
+                        'symbol': symbol,
+                        'signal': opportunity['signal'],
+                        'price': opportunity['current_price'], 
+                        'shares': trade_result['position']['shares'],
+                        'confidence': opportunity['confidence'],
+                        'amount': trade_result['position']['investment_amount']
+                    }
+                    notify_trade(discord_trade_data)
+                except Exception as e:
+                    print(f"⚠️ Failed to send Discord trade notification: {e}")
                 
                 return {
                     'success': True,
@@ -283,6 +316,24 @@ class TradingEngine:
                             self.trading_stats['failed_trades'] += 1
                         
                         self.trading_stats['total_profit'] += pnl
+                        
+                        # ADD THIS: Send Discord notification about closed position
+                        try:
+                            # Get position details from risk manager portfolio
+                            if symbol in self.risk_manager.portfolio:
+                                position = self.risk_manager.portfolio[symbol]
+                                discord_position_data = {
+                                    'symbol': symbol,
+                                    'pnl': pnl,
+                                    'reason': reason,
+                                    'entry_price': position.get('entry_price', 0),
+                                    'exit_price': position.get('current_price', 0),
+                                    'shares': position.get('shares', 0),
+                                    'days_held': (datetime.now() - datetime.fromisoformat(position.get('entry_date', datetime.now().isoformat()))).days
+                                }
+                                notify_position_closed(discord_position_data)
+                        except Exception as e:
+                            print(f"⚠️ Failed to send Discord position closed notification: {e}")
             
             return update_result
             
@@ -420,6 +471,13 @@ class TradingEngine:
         
         self.add_alert('ENGINE_START', 'AI Trading Engine started')
         
+        # ADD THIS: Send Discord startup notification
+        try:
+            if discord_notifier.enabled:
+                await discord_notifier.send_startup_message()
+        except Exception as e:
+            print(f"⚠️ Failed to send Discord startup notification: {e}")
+        
         try:
             while self.is_running:
                 await self.run_trading_cycle()
@@ -431,7 +489,9 @@ class TradingEngine:
         except KeyboardInterrupt:
             print("\n🛑 Received stop signal...")
         except Exception as e:
-            print(f"❌ Engine error: {e}")
+            error_msg = f"Engine error: {e}"
+            print(f"❌ {error_msg}")
+            self.add_alert('ERROR', error_msg)
         finally:
             self.is_running = False
             self.add_alert('ENGINE_STOP', 'AI Trading Engine stopped')
@@ -471,6 +531,8 @@ class TradingEngine:
             return result
             
         except Exception as e:
+            error_msg = f"Manual trade error for {symbol}: {e}"
+            self.add_alert('ERROR', error_msg, symbol)
             return {'success': False, 'error': str(e)}
     
     def get_recent_alerts(self, limit: int = 20) -> List[Dict]:
@@ -488,12 +550,46 @@ class TradingEngine:
             'trading_stats': self.trading_stats,
             'portfolio_summary': self.risk_manager.get_portfolio_summary(),
             'recent_alerts': self.get_recent_alerts(10),
-            'cache_stats': self.market_data.get_cache_stats()
+            'cache_stats': self.market_data.get_cache_stats(),
+            'discord_enabled': discord_notifier.enabled  # ADD THIS: Show Discord status
         }
+    
+    async def send_daily_summary(self):
+        """Send end-of-day portfolio summary to Discord"""
+        try:
+            if not discord_notifier.enabled:
+                return
+                
+            portfolio_summary = self.get_portfolio_status()
+            
+            # Calculate daily change (simplified - you might want to track this better)
+            total_value = portfolio_summary.get('total_value', 0)
+            total_return = portfolio_summary.get('total_return', 0)
+            positions = portfolio_summary.get('number_of_positions', 0)
+            
+            # Count today's trades
+            trades_today = len([
+                alert for alert in self.alerts 
+                if alert['type'] == 'TRADE_EXECUTED' 
+                and alert['timestamp'].startswith(datetime.now().strftime('%Y-%m-%d'))
+            ])
+            
+            summary_data = {
+                'total_value': total_value,
+                'daily_change': total_return,  # Simplified
+                'daily_change_percent': portfolio_summary.get('total_return_percent', 0),
+                'positions': positions,
+                'trades_today': trades_today
+            }
+            
+            await discord_notifier.send_daily_summary(summary_data)
+            
+        except Exception as e:
+            print(f"⚠️ Failed to send Discord daily summary: {e}")
 
 # Example usage
 if __name__ == "__main__":
-    print("🧪 Testing Trading Engine...")
+    print("🧪 Testing Trading Engine with Discord integration...")
     
     # Create trading engine with $10,000 fake money
     engine = TradingEngine(initial_balance=10000, auto_trade=False)
@@ -512,6 +608,7 @@ if __name__ == "__main__":
     print("\n📊 Testing portfolio status...")
     status = engine.get_portfolio_status()
     print(f"Portfolio value: ${status.get('total_value', 0):,.2f}")
+    print(f"Discord enabled: {status.get('discord_enabled', False)}")
     
     # Test getting top predictions
     print("\n🔮 Testing top predictions...")
@@ -520,3 +617,4 @@ if __name__ == "__main__":
         print(f"   {pred['symbol']}: {pred['percent_change']:+.2f}% ({pred['confidence']:.1%})")
     
     print("\n✅ Trading Engine test completed!")
+    print("💬 Discord notifications will work when you set up the webhook URL!")
