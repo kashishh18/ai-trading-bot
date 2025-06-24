@@ -262,8 +262,25 @@ async def websocket_endpoint(websocket: WebSocket):
             
     except WebSocketDisconnect:
         connected_clients.remove(websocket)
+@app.get("/test-prediction/{symbol}")
+async def test_prediction(symbol: str):
+    """Simple prediction test"""
+    try:
+        from models.ml_models import StockPredictor
+        predictor = StockPredictor(symbol.upper())
+        success = predictor.train_model("RandomForest")
+        if success:
+            prediction = predictor.predict_next_price()
+            return prediction
+        else:
+            return {"error": "Training failed"}
+    except Exception as e:
+        return {"error": str(e)}
+
 
 # Run the server
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+

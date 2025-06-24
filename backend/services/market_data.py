@@ -431,7 +431,7 @@ if __name__ == "__main__":
     # Test trending stocks
     print("\n🔥 Testing trending stocks...")
     trending = market_service.get_trending_stocks()
-    print(f"Top 3 trending: {[f\"{s['symbol']} ({s['change']:+.2f}%)\" for s in trending[:3]]}")
+    print("Top 3 trending: " + str([s["symbol"] + " (" + str(s["change"]) + "%)" for s in trending[:3]]))
     
     # Test technical indicators
     print("\n🔧 Testing technical indicators...")
