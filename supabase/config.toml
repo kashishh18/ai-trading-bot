@@ -1,0 +1,7 @@
+project_id = "detwkdkedbwsjbwvjoiz"
+
+[functions.yahoo-finance-data]
+verify_jwt = false
+
+[functions.ai-trading-analysis]
+verify_jwt = false
